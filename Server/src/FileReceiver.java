@@ -6,8 +6,8 @@ import java.net.SocketTimeoutException;
 
 public class FileReceiver {
 
-    private final int TARGET_PORT = 4712;
-    private final int THIS_PORT = 4711;
+    private final int TARGET_PORT = 9001;
+    private final int THIS_PORT = 9000;
     private static final int SIZE = 1400;
     private final int timeout = 20000;
     private int oncethrough;
@@ -44,6 +44,7 @@ public class FileReceiver {
     public void receive() {
         while (oncethrough == 0 || !rcvpkg.isEnd()) {
             rcvpkg = rdt_rcv();
+            System.out.println(rcvpkg.isEnd());
             if (!rcvpkg.isCorrupted()) {
                 if (rcvpkg.getSeq() == 0) {
                     processTransition(Trans.OK_0);
@@ -63,7 +64,7 @@ public class FileReceiver {
     public Package rdt_rcv() {
         Package rcvpkg = null;
         try (DatagramSocket datagramSocket = new DatagramSocket(this.THIS_PORT)) {
-            //datagramSocket.setSoTimeout(timeout);
+            datagramSocket.setSoTimeout(timeout);
 
             DatagramPacket p = new DatagramPacket(new byte[SIZE], SIZE);
             datagramSocket.receive(p);
@@ -75,11 +76,11 @@ public class FileReceiver {
         return rcvpkg;
     }
 
-    public void udt_send() {
+    public void udt_send(Package sndpkt) {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         try {
             ObjectOutputStream os = new ObjectOutputStream(outputStream);
-            os.writeObject(this.sndpkg);
+            os.writeObject(sndpkg);
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -135,7 +136,7 @@ public class FileReceiver {
             deliverData();
             //make
             sndpkg = new Package(0, true, false, "Hallo Welt");
-            udt_send();
+            udt_send(sndpkg);
             oncethrough = 1;
             return State.WAIT_GET_1;
         }
@@ -145,7 +146,7 @@ public class FileReceiver {
     class TWO extends Transition {
         @Override
         public FileReceiver.State execute(FileReceiver.Trans input) {
-            udt_send();
+            udt_send(sndpkg);
             return State.WAIT_GET_1;
         }
 
@@ -157,7 +158,7 @@ public class FileReceiver {
             deliverData();
             //make
             sndpkg = new Package(1, true, false, "Hallo Welt");
-            udt_send();
+            udt_send(sndpkg);
             return State.WAIT_GET_0;
         }
 
@@ -167,7 +168,7 @@ public class FileReceiver {
         @Override
         public FileReceiver.State execute(FileReceiver.Trans input) {
             if (oncethrough == 1) {
-                udt_send();
+                udt_send(sndpkg);
             }
             return State.WAIT_GET_0;
         }

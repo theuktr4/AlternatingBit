@@ -17,8 +17,8 @@ public class FileSender {
 
     private State currentState;
     private Transition[][] transition;
-    private int TARGET_PORT = 4711;
-    private int THIS_PORT = 4712;
+    private int TARGET_PORT = 9000;
+    private int THIS_PORT = 9001;
     private static final int SIZE = 10;
 
     private String ip = "localhost";
@@ -57,23 +57,28 @@ public class FileSender {
             rdt_send();
         }
     }
-    public void rdt_send(){
+
+    public void rdt_send() {
         processTransition(Trans.RDT_SEND);
         Package p = rdt_rcv();
-        if (!p.isCorrupted()) {
-            if (p.getSeq() == 0) {
-                processTransition(Trans.RCV_0_OK);
+        if (p != null) {
+            if (!p.isCorrupted()) {
+                if (p.getSeq() == 0) {
+                    processTransition(Trans.RCV_0_OK);
+                } else {
+                    processTransition(Trans.RCV_1_OK);
+                }
             } else {
-                processTransition(Trans.RCV_1_OK);
-            }
-        } else {
-            if (p.getSeq() == 0) {
-                processTransition(Trans.RCV_0_NOK);
-            } else {
-                processTransition(Trans.RCV_1_NOK);
+                if (p.getSeq() == 0) {
+                    processTransition(Trans.RCV_0_NOK);
+                } else {
+                    processTransition(Trans.RCV_1_NOK);
+                }
             }
         }
+
     }
+
     public Package makePackage() {
         int seq = sent % 2 == 0 ? 0 : 1;
         Package res = null;
@@ -81,7 +86,7 @@ public class FileSender {
             res = new Package(seq, false, true, toBeSent);
             toBeSent = "";
         } else {
-            res = new Package(seq, false, true, toBeSent.substring(0, SIZE - 1));
+            res = new Package(seq, false, false, toBeSent.substring(0, SIZE - 1));
             toBeSent = toBeSent.substring(SIZE);
         }
         sent++;
@@ -90,9 +95,9 @@ public class FileSender {
 
     public Package rdt_rcv() {
         Package rcvpkg = null;
-        try (DatagramSocket datagramSocket = new DatagramSocket(this.TARGET_PORT)) {
+        try (DatagramSocket datagramSocket = new DatagramSocket(this.THIS_PORT)) {
             datagramSocket.setSoTimeout(this.timeout);
-            DatagramPacket p = new DatagramPacket(new byte[SIZE], SIZE);
+            DatagramPacket p = new DatagramPacket(new byte[1024], 1024);
             datagramSocket.receive(p);
             //TODO
             //Prüfen und weiterverarbeiten
@@ -131,8 +136,8 @@ public class FileSender {
         ByteArrayInputStream in = new ByteArrayInputStream(data);
         try {
             ObjectInputStream is = new ObjectInputStream(in);
-            Package result = (Package) is.readObject();
-            System.out.println("Erhalten: " + result.getContent());
+            res = (Package) is.readObject();
+            System.out.println("Erhalten: " + res.getContent());
         } catch (IOException e) {
             e.printStackTrace();
         } catch (ClassNotFoundException e) {

@@ -12,6 +12,7 @@ public class Package implements Serializable {
     public Package(int seq, boolean ack,boolean end, String content) {
         this.seq = seq;
         this.ack = ack;
+        this.end=end;
         this.content = content;
         //TODO
         this.checkSum = (short) (seq + content.length());
