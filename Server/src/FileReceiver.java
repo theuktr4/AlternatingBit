@@ -16,7 +16,7 @@ public class FileReceiver {
     private double pDuplicate;
     private final int TARGET_PORT = 9001;
     private final int THIS_PORT = 9000;
-    private static final int SIZE = 500;
+    private static final int SIZE = 1400;
     private final int timeout = 20000;
     private int oncethrough;
     long byteReceived;

@@ -25,7 +25,7 @@ public class FileSender {
     private Transition[][] transition;
     private int TARGET_PORT = 9000;
     private int THIS_PORT = 9001;
-    private static final int SIZE = 500;
+    private static final int SIZE = 1400;
 
     private String ip = "localhost";
 
@@ -222,7 +222,7 @@ public class FileSender {
             DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), this.TARGET_PORT);
             socket.send(sendP);
             try {
-                Thread.sleep(300);
+                Thread.sleep(30);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -269,7 +269,7 @@ public class FileSender {
     }
 
     public static void main(String[] args) {
-        new FileSender(200, 0.05, 0.1, 0.05);
+        new FileSender(30, 0.05, 0.1, 0.05);
     }
 
     abstract class Transition {
