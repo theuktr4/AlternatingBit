@@ -8,13 +8,13 @@ import java.util.zip.Checksum;
 
 public class FileSender {
     enum State {
-        WAIT_SEND_0, WAIT_SEND_1, WAIT_ACK_0, WAIT_ACK_1,
+        WAIT_SEND_0, WAIT_SEND_1, WAIT_ACK_0, WAIT_ACK_1, END
     }
 
     ;
 
     enum Trans {
-        RDT_SEND, ACK_0, ACK_1, TIMEOUT, COR
+        RDT_SEND, ACK_0, ACK_1, TIMEOUT, CORRUPT, ACK_0_END, ACK_1_END
     }
 
     private double pBitfehler;
@@ -29,30 +29,13 @@ public class FileSender {
 
     private String ip = "localhost";
 
-    private int curAck;
-    private int seq;
     private int timeout;
 
     private Package sndpkt;
 
-    private String stringToBeSend = "Wer während der Autofahrt über Handy oder Freisprechanlage telefoniert, fährt wie ein\n" +
-            "angetrunkener Wagenlenker. Zu diesem Schluss kommen die Psychologen Frank Drews,\n" +
-            "David Strayer und der Toxikologe Dennis Crouch von der Universität Utah in ihrer Studie,\n" +
-            "die sie heute in dem Journal Human Factors veröffentlichen. 25 Männer und 15 Frauen im\n" +
-            "Alter zwischen 22 und 34 Jahren nahmen an «A Comparison of the Cell Phone Driver and\n" +
-            "the Drunk Driver» teil. Das Bundesamt für Luftfahrt finanzierte die Untersuchungen mit\n" +
-            "25 000 Dollar, um Rückschlüsse auf die Aufmerksamkeit von Piloten ziehen zu können.\n" +
-            "«Wenn Sie hinter dem Lenkrad telefonieren, fahren Sie, als ob Sie 0,8 Promille Alkohol\n" +
-            "intus hätten», erklärt Frank Drews, Assistenz-Professor für Psychologie. Diese Blutalkoholkonzentration sei bereits in den meisten amerikanischen Staaten illegal. «Wenn der\n" +
-            "Gesetzgeber wirklich das Autofahren sicherer machen möchte, sollte er das Telefonieren\n" +
-            "komplett verbieten», meint Drews.\n" +
-            "Sowohl Freisprechanlage als auch Handy beeinflussten den Fahrstil und zeigten keinen\n" +
-            "Unterschied im Grad der Ablenkung. «Das stellt besonders die Auflagen in Frage, die das\n" +
-            "Telefonieren mit Handys verbieten, es aber über Freisprechanlage erlauben.» Verglichen\n" +
-            "mit konzentrierten Fahrern steuerten die telefonierenden Insassen ihr Gefährt in der Simulation etwas langsamer, bremsten später und benötigen mehr Zeit führ die Anfahrt danach. Durch das Auswerten aktueller und früherer Studien zeigen die Forscher, dass Telefonierende fünf Mal eher in einen Unfall verwickelt werden. Die gleiche\n" +
-            "Wahrscheinlichkeit geben andere Studien für Fahrer mit 0,8 Promille Blutalkohol an. […] ";
-    private byte[] toBeSend = stringToBeSend.getBytes();
-    private File file = new File("C:\\Users\\Lukas\\IdeaProjects\\AlternatingBit\\Client\\src\\alf.webp");
+    String path = "C:\\Users\\Lukas\\IdeaProjects\\AlternatingBit\\Client\\ressources\\alf.webp";
+    private File file = new File(path);
+    private long ByteLeft;
     FileInputStream targetStream;
 
     private int sent = 0;
@@ -61,7 +44,6 @@ public class FileSender {
         this.pBitfehler = pBitfehler;
         this.pLoss = pLoss;
         this.pDuplicate = pDuplicate;
-
         this.timeout = timeout;
         currentState = State.WAIT_SEND_0;
         transition = new Transition[State.values().length][Trans.values().length];
@@ -71,8 +53,11 @@ public class FileSender {
         transition[State.WAIT_SEND_1.ordinal()][Trans.RDT_SEND.ordinal()] = new FOUR();
         transition[State.WAIT_ACK_1.ordinal()][Trans.TIMEOUT.ordinal()] = new FIVE();
         transition[State.WAIT_ACK_1.ordinal()][Trans.ACK_1.ordinal()] = new SIX();
+        transition[State.WAIT_ACK_0.ordinal()][Trans.ACK_0_END.ordinal()] = new END();
+        transition[State.WAIT_ACK_1.ordinal()][Trans.ACK_1_END.ordinal()] = new END();
         try {
             targetStream = new FileInputStream(file);
+            ByteLeft = file.length();
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         }
@@ -83,46 +68,50 @@ public class FileSender {
 
 
     public void send() {
-        while (stringToBeSend.length() > 0) {
+        while (this.currentState != State.END) {
+            //Ende
             processTransition(Trans.RDT_SEND);
             DatagramPacket dp = rdt_rcv();
             if (dp != null) {
                 byte[] data = dp.getData();
                 if (isCorrupted(data)) {
-                    processTransition(Trans.COR);
+                    processTransition(Trans.CORRUPT);
                 } else {
                     Package p = serializePacket(removeChecksum(data));
                     if (p.isAck() && p.getSeq() == 0) {
-                        processTransition(Trans.ACK_0);
-
+                        if (p.isEnd() && sndpkt.isEnd()) {
+                            processTransition(Trans.ACK_0_END);
+                        } else {
+                            processTransition(Trans.ACK_0);
+                        }
                     } else if (p.isAck() && p.getSeq() == 1) {
-                        processTransition(Trans.ACK_1);
+                        if (p.isEnd() && sndpkt.isEnd()) {
+                            processTransition(Trans.ACK_1_END);
+                        } else {
+                            processTransition(Trans.ACK_1);
+                        }
+
                     }
                 }
             }
 
+        }
+        try {
+            System.out.println(targetStream.available());
+        } catch (IOException e) {
+            e.printStackTrace();
         }
 
     }
 
     public Package makePackage(int seq) {
         Package res = null;
+        int contentSize = SIZE - 100;
+        boolean end = ByteLeft < contentSize;
+        byte[] content = new byte[SIZE - 100];
         try {
-            byte[] content = new byte[SIZE - 100];
-
-            if (targetStream.available() <= SIZE - 100) {
-                for (int i = 0; i < targetStream.available(); i++) {
-                    content[i] = (byte) targetStream.read();
-                }
-
-                res = new Package(seq, false, true, content);
-                stringToBeSend = "";
-            } else {
-                for (int i = 0; i < SIZE - 100; i++) {
-                    content[i] = (byte) targetStream.read();
-                }
-                res = new Package(seq, false, false, content);
-            }
+            ByteLeft -= targetStream.read(content);
+            res = new Package(seq, false, end, content);
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -174,6 +163,7 @@ public class FileSender {
         ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
         buffer.putLong(crc32.getValue());
         System.arraycopy(buffer.array(), 0, res, 0, 8);
+        System.out.println("added checksum: " + crc32.getValue());
         return res;
     }
 
@@ -212,12 +202,12 @@ public class FileSender {
 
     void sendUnreliable(byte[] data, DatagramSocket socket) throws IOException {
         //verworfen
-        if (new Random().nextInt((int)(1/pLoss)+1) == 0) {
+        if (new Random().nextInt((int) (1 / pLoss) + 1) == 0) {
             System.err.println("Verworfen");
             return;
         }
         //dupliziert
-        if (new Random().nextInt((int) (1/pDuplicate)+1) == 0) {
+        if (new Random().nextInt((int) (1 / pDuplicate) + 1) == 0) {
             System.err.println("Duplikat");
             DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), this.TARGET_PORT);
             socket.send(sendP);
@@ -229,7 +219,7 @@ public class FileSender {
             socket.send(sendP);
         }
         //Bitfehler
-        else if (new Random().nextInt((int) (1/pBitfehler)+1) == 0) {
+        else if (new Random().nextInt((int) (1 / pBitfehler) + 1) == 0) {
             System.err.println("Bitfehler");
             int rdmByte = new Random().nextInt(data.length);
             if (data[rdmByte] == 1) {
@@ -269,7 +259,7 @@ public class FileSender {
     }
 
     public static void main(String[] args) {
-        new FileSender(30, 0.05, 0.1, 0.05);
+        new FileSender(50, 0.05, 0.1, 0.05);
     }
 
     abstract class Transition {
@@ -326,6 +316,14 @@ public class FileSender {
         @Override
         public FileSender.State execute(FileSender.Trans input) {
             return State.WAIT_SEND_0;
+        }
+
+    }
+
+    class END extends Transition {
+        @Override
+        public FileSender.State execute(FileSender.Trans input) {
+            return State.END;
         }
 
     }

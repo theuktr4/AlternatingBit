@@ -17,17 +17,18 @@ public class FileReceiver {
     private final int TARGET_PORT = 9001;
     private final int THIS_PORT = 9000;
     private static final int SIZE = 1400;
-    private final int timeout = 20000;
+    private int timeout;
     private int oncethrough;
     long byteReceived;
+
     enum State {
-        WAIT_GET_0, WAIT_GET_1
+        WAIT_GET_0, WAIT_GET_1, LAST_ACK_SENT, END
     }
 
     ;
 
     enum Trans {
-        SEQ_0, SEQ_1, COR
+        SEQ_0, SEQ_0_END, SEQ_1, SEQ_1_END, CORRUPT, RESEND_LAST, TIMEOUT
     }
 
     State currentState;
@@ -36,20 +37,25 @@ public class FileReceiver {
     Package sndpkg = null;
 
     public FileReceiver(double pBitfehler, double pLoss, double pDuplicate) {
-        this.byteReceived=0;
+        this.byteReceived = 0;
         this.pBitfehler = pBitfehler;
         this.pLoss = pLoss;
-        long byteReceived = 0;
         this.pDuplicate = pDuplicate;
+        this.timeout = 30000;
         String path = "C:\\Users\\Lukas\\IdeaProjects\\AlternatingBit\\Server\\ressources\\alf.webp";
         currentState = State.WAIT_GET_0;
         transition = new Transition[State.values().length][Trans.values().length];
         transition[State.WAIT_GET_0.ordinal()][Trans.SEQ_0.ordinal()] = new ONE();
         transition[State.WAIT_GET_0.ordinal()][Trans.SEQ_1.ordinal()] = new FIVE();
-        transition[State.WAIT_GET_0.ordinal()][Trans.COR.ordinal()] = new SIX();
+        transition[State.WAIT_GET_0.ordinal()][Trans.SEQ_0_END.ordinal()] = new LASTP();
+        transition[State.WAIT_GET_0.ordinal()][Trans.CORRUPT.ordinal()] = new SIX();
         transition[State.WAIT_GET_1.ordinal()][Trans.SEQ_1.ordinal()] = new FOUR();
         transition[State.WAIT_GET_1.ordinal()][Trans.SEQ_0.ordinal()] = new THREE();
-        transition[State.WAIT_GET_1.ordinal()][Trans.COR.ordinal()] = new TWO();
+        transition[State.WAIT_GET_1.ordinal()][Trans.CORRUPT.ordinal()] = new TWO();
+        transition[State.WAIT_GET_1.ordinal()][Trans.SEQ_1_END.ordinal()] = new LASTP();
+        transition[State.LAST_ACK_SENT.ordinal()][Trans.TIMEOUT.ordinal()] = new END();
+        transition[State.LAST_ACK_SENT.ordinal()][Trans.RESEND_LAST.ordinal()] = new RESENDLAST();
+
         //start
         oncethrough = 0;
         //get package
@@ -59,40 +65,60 @@ public class FileReceiver {
             e.printStackTrace();
         }
         receive();
+        //make sure last ack was successfull
+        this.timeout = 500;
+        while (currentState != State.END) {
+            rdt_rcv();
+            if (currentState != State.END) {
+                processTransition(Trans.RESEND_LAST);
+            }
+        }
 
     }
 
     public void receive() {
         long start = 0;
-        while (oncethrough == 0 || !rcvpkg.isEnd()) {
+        while (oncethrough == 0 || currentState != State.LAST_ACK_SENT) {
             byte[] data = rdt_rcv().getData();
-            start = start==0?System.currentTimeMillis():start;
+            start = start == 0 ? System.currentTimeMillis() : start;
             if (isCorrupted(data)) {
-                processTransition(Trans.COR);
+                processTransition(Trans.CORRUPT);
             } else {
                 rcvpkg = serializePacket(removeChecksum(data));
                 if (rcvpkg.getSeq() == 0) {
-                    processTransition(Trans.SEQ_0);
+                    if (rcvpkg.isEnd()) {
+                        processTransition(Trans.SEQ_0_END);
+                    } else {
+                        processTransition(Trans.SEQ_0);
+                    }
                 } else {
-                    processTransition(Trans.SEQ_1);
+                    if (rcvpkg.isEnd()) {
+                        processTransition(Trans.SEQ_1_END);
+                    } else {
+                        processTransition(Trans.SEQ_1);
+                    }
+
                 }
             }
         }
-        System.out.printf("%nGoodput: %.2f kB/s%n",(double)this.byteReceived/(System.currentTimeMillis()-start));
+        System.out.printf("%nGoodput: %.2f kB/s%n", (double) this.byteReceived / (System.currentTimeMillis() - start));
         try {
             fos.close();
         } catch (IOException e) {
             e.printStackTrace();
         }
+
     }
 
     public DatagramPacket rdt_rcv() {
         DatagramPacket rcvpkg = null;
         try (DatagramSocket datagramSocket = new DatagramSocket(this.THIS_PORT)) {
             DatagramPacket p = new DatagramPacket(new byte[SIZE + 8], SIZE + 8);
+            datagramSocket.setSoTimeout(timeout);
             datagramSocket.receive(p);
             rcvpkg = p;
-
+        } catch (SocketTimeoutException end) {
+            processTransition(Trans.TIMEOUT);
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -129,6 +155,7 @@ public class FileReceiver {
         ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
         buffer.putLong(crc32.getValue());
         System.arraycopy(buffer.array(), 0, res, 0, 8);
+        System.out.println("added checksum: " + crc32.getValue());
         return res;
     }
 
@@ -166,19 +193,19 @@ public class FileReceiver {
 
     void sendUnreliable(byte[] data, DatagramSocket socket) throws IOException {
         //verworfen
-        if (new Random().nextInt((int)(1/pLoss)) == 0) {
+        if (new Random().nextInt((int) (1 / pLoss)) == 0) {
             System.err.println("Verworfen");
             return;
         }
         //dupliziert
-        else if (new Random().nextInt((int)(1/pDuplicate)+1) == 0) {
+        else if (new Random().nextInt((int) (1 / pDuplicate) + 1) == 0) {
             System.err.println("Duplikat");
             DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), this.TARGET_PORT);
             socket.send(sendP);
             socket.send(sendP);
         }
         //Bitfehler
-        else if (new Random().nextInt((int)(1/pBitfehler)+1) == 0) {
+        else if (new Random().nextInt((int) (1 / pBitfehler) + 1) == 0) {
             System.err.println("Bitfehler");
             int rdmByte = new Random().nextInt(data.length);
             if (data[rdmByte] == 1) {
@@ -226,7 +253,7 @@ public class FileReceiver {
     }
 
     public static void main(String[] args) {
-        new FileReceiver(0.05, 0.1, 0.05);
+        new FileReceiver(0.1, 0.05, 0.1);
     }
 
     abstract class Transition {
@@ -259,6 +286,7 @@ public class FileReceiver {
         @Override
         public FileReceiver.State execute(FileReceiver.Trans input) {
             udt_send(sndpkg);
+            rcvpkg = null;
             return State.WAIT_GET_1;
         }
 
@@ -280,6 +308,7 @@ public class FileReceiver {
         @Override
         public FileReceiver.State execute(FileReceiver.Trans input) {
             if (oncethrough == 1) {
+                rcvpkg = null;
                 udt_send(sndpkg);
             }
             return State.WAIT_GET_0;
@@ -294,6 +323,34 @@ public class FileReceiver {
                 udt_send(sndpkg);
             }
             return State.WAIT_GET_0;
+        }
+
+    }
+
+    class LASTP extends Transition {
+        @Override
+        public FileReceiver.State execute(FileReceiver.Trans input) {
+            deliverData();
+            sndpkg = new Package(rcvpkg.getSeq(), true, true, new byte[0]);
+            udt_send(sndpkg);
+            return State.LAST_ACK_SENT;
+        }
+
+    }
+
+    class RESENDLAST extends Transition {
+        @Override
+        public FileReceiver.State execute(FileReceiver.Trans input) {
+            udt_send(sndpkg);
+            return State.LAST_ACK_SENT;
+        }
+
+    }
+
+    class END extends Transition {
+        @Override
+        public FileReceiver.State execute(FileReceiver.Trans input) {
+            return State.END;
         }
 
     }
