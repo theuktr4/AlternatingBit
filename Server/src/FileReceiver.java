@@ -99,7 +99,7 @@ public class FileReceiver {
                 }
             }
         }
-        System.out.printf("%nGoodput: %.2f kB/s%n", (double) this.byteReceived / (System.currentTimeMillis() - start));
+        System.out.printf("%nGoodput: %.2f kbit/s%n", (double) this.byteReceived*8 / (System.currentTimeMillis() - start));
         try {
             fos.close();
         } catch (IOException e) {
