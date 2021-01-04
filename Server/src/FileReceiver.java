@@ -11,11 +11,9 @@ import java.util.zip.Checksum;
 
 public class FileReceiver {
     private FileOutputStream fos;
-    private double pBitfehler;
-    private double pLoss;
-    private double pDuplicate;
-    private final int TARGET_PORT = 9001;
-    private final int THIS_PORT = 9000;
+    private final double pBitfehler;
+    private final double pLoss;
+    private final double pDuplicate;
     private static final int SIZE = 1400;
     private int timeout;
     private int oncethrough;
@@ -112,7 +110,8 @@ public class FileReceiver {
 
     public DatagramPacket rdt_rcv() {
         DatagramPacket rcvpkg = null;
-        try (DatagramSocket datagramSocket = new DatagramSocket(this.THIS_PORT)) {
+        int THIS_PORT = 9000;
+        try (DatagramSocket datagramSocket = new DatagramSocket(THIS_PORT)) {
             DatagramPacket p = new DatagramPacket(new byte[SIZE + 8], SIZE + 8);
             datagramSocket.setSoTimeout(timeout);
             datagramSocket.receive(p);
@@ -193,19 +192,20 @@ public class FileReceiver {
 
     void sendUnreliable(byte[] data, DatagramSocket socket) throws IOException {
         //verworfen
-        if (new Random().nextInt((int) (1 / pLoss)) == 0) {
+        int TARGET_PORT = 9001;
+        if (pLoss > 0.0 && new Random().nextInt((int) (1 / pLoss)) == 0) {
             System.err.println("Verworfen");
             return;
         }
         //dupliziert
-        else if (new Random().nextInt((int) (1 / pDuplicate) + 1) == 0) {
+        else if (pDuplicate > 0.0 && new Random().nextInt((int) (1 / pDuplicate) + 1) == 0) {
             System.err.println("Duplikat");
-            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), this.TARGET_PORT);
+            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), TARGET_PORT);
             socket.send(sendP);
             socket.send(sendP);
         }
         //Bitfehler
-        else if (new Random().nextInt((int) (1 / pBitfehler) + 1) == 0) {
+        else if (pBitfehler > 0.0 && new Random().nextInt((int) (1 / pBitfehler) + 1) == 0) {
             System.err.println("Bitfehler");
             int rdmByte = new Random().nextInt(data.length);
             if (data[rdmByte] == 1) {
@@ -213,10 +213,10 @@ public class FileReceiver {
             } else {
                 data[rdmByte] = 1;
             }
-            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), this.TARGET_PORT);
+            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), TARGET_PORT);
             socket.send(sendP);
         } else {
-            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), this.TARGET_PORT);
+            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), TARGET_PORT);
             socket.send(sendP);
         }
     }

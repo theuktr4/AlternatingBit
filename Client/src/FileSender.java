@@ -17,28 +17,23 @@ public class FileSender {
         RDT_SEND, ACK_0, ACK_1, TIMEOUT, CORRUPT, ACK_0_END, ACK_1_END
     }
 
-    private double pBitfehler;
-    private double pLoss;
-    private double pDuplicate;
+    private final double pBitfehler;
+    private final double pLoss;
+    private final double pDuplicate;
 
     private State currentState;
-    private Transition[][] transition;
-    private int TARGET_PORT = 9000;
-    private int THIS_PORT = 9001;
+    private final Transition[][] transition;
     private static final int SIZE = 1400;
 
     private String ip = "localhost";
 
-    private int timeout;
+    private final int timeout;
 
     private Package sndpkt;
 
     String path = "C:\\Users\\Lukas\\IdeaProjects\\AlternatingBit\\Client\\ressources\\alf.webp";
-    private File file = new File(path);
     private long ByteLeft;
     FileInputStream targetStream;
-
-    private int sent = 0;
 
     public FileSender(int timeout, double pBitfehler, double pLoss, double pDuplicate) {
         this.pBitfehler = pBitfehler;
@@ -56,6 +51,7 @@ public class FileSender {
         transition[State.WAIT_ACK_0.ordinal()][Trans.ACK_0_END.ordinal()] = new END();
         transition[State.WAIT_ACK_1.ordinal()][Trans.ACK_1_END.ordinal()] = new END();
         try {
+            File file = new File(path);
             targetStream = new FileInputStream(file);
             ByteLeft = file.length();
         } catch (FileNotFoundException e) {
@@ -120,7 +116,8 @@ public class FileSender {
 
     public DatagramPacket rdt_rcv() {
         DatagramPacket rcvpkg = null;
-        try (DatagramSocket datagramSocket = new DatagramSocket(this.THIS_PORT)) {
+        int THIS_PORT = 9001;
+        try (DatagramSocket datagramSocket = new DatagramSocket(THIS_PORT)) {
             datagramSocket.setSoTimeout(this.timeout);
             DatagramPacket p = new DatagramPacket(new byte[SIZE + 8], SIZE + 8);
             datagramSocket.receive(p);
@@ -202,14 +199,15 @@ public class FileSender {
 
     void sendUnreliable(byte[] data, DatagramSocket socket) throws IOException {
         //verworfen
-        if (new Random().nextInt((int) (1 / pLoss) + 1) == 0) {
+        if (pLoss > 0.0 && new Random().nextInt((int) (1 / pLoss) + 1) == 0) {
             System.err.println("Verworfen");
             return;
         }
         //dupliziert
-        if (new Random().nextInt((int) (1 / pDuplicate) + 1) == 0) {
+        int TARGET_PORT = 9000;
+        if (pDuplicate > 0.0 && new Random().nextInt((int) (1 / pDuplicate) + 1) == 0) {
             System.err.println("Duplikat");
-            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), this.TARGET_PORT);
+            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), TARGET_PORT);
             socket.send(sendP);
             try {
                 Thread.sleep(30);
@@ -219,7 +217,7 @@ public class FileSender {
             socket.send(sendP);
         }
         //Bitfehler
-        else if (new Random().nextInt((int) (1 / pBitfehler) + 1) == 0) {
+        else if (pBitfehler > 0.0 && new Random().nextInt((int) (1 / pBitfehler) + 1) == 0) {
             System.err.println("Bitfehler");
             int rdmByte = new Random().nextInt(data.length);
             if (data[rdmByte] == 1) {
@@ -227,10 +225,10 @@ public class FileSender {
             } else {
                 data[rdmByte] = 1;
             }
-            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), this.TARGET_PORT);
+            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), TARGET_PORT);
             socket.send(sendP);
         } else {
-            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), this.TARGET_PORT);
+            DatagramPacket sendP = new DatagramPacket(data, data.length, InetAddress.getByName("localhost"), TARGET_PORT);
             socket.send(sendP);
         }
     }
